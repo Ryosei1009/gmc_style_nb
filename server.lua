@@ -3,6 +3,29 @@
 
 local QBCore = exports['qb-core']:GetCoreObject()
 
+local function normalizeText(value)
+    if value == nil then
+        return ''
+    end
+
+    return tostring(value):gsub('^%s*(.-)%s*$', '%1')
+end
+
+local function isPhotoJob(player)
+    if not player or not player.PlayerData or not player.PlayerData.job then
+        return false
+    end
+
+    local jobName = player.PlayerData.job.name
+    return jobName == 'photo'
+end
+
+CreateThread(function()
+    -- 既存環境でも新機能が動くように起動時にマイグレーション
+    exports.oxmysql:execute('ALTER TABLE style_magazines ADD COLUMN IF NOT EXISTS is_public TINYINT(1) NOT NULL DEFAULT 1', {})
+    exports.oxmysql:execute('ALTER TABLE style_magazines ADD COLUMN IF NOT EXISTS purchase_password VARCHAR(100) NULL', {})
+end)
+
 -- ============================================
 -- 雑誌一覧取得
 -- ============================================
@@ -13,8 +36,10 @@ AddEventHandler('style_nb:getMagazines', function(callbackId)
     if not Player then return end
 
     local citizenid = Player.PlayerData.citizenid
+    local isPhoto = Player.PlayerData.job.name == 'photo'
+    local canViewPrivate = isPhotoJob(Player)
 
-    -- 雑誌一覧と購入状態を取得
+    -- 雑誌一覧と購入状態を取得（photoジョブの場合は購入数も取得）
     exports.oxmysql:fetch([[
         SELECT
             m.id,
@@ -22,15 +47,25 @@ AddEventHandler('style_nb:getMagazines', function(callbackId)
             m.description,
             m.cover_image,
             m.price,
+            m.is_public,
+            CASE WHEN COALESCE(m.purchase_password, '') <> '' THEN 1 ELSE 0 END as requires_password,
             m.created_at,
-            IFNULL(pm.citizenid, '') as purchased
+            IFNULL(pm.citizenid, '') as purchased,
+            (SELECT COUNT(*) FROM style_purchased_magazines WHERE magazine_id = m.id) as purchase_count
         FROM style_magazines m
         LEFT JOIN style_purchased_magazines pm
             ON m.id = pm.magazine_id AND pm.citizenid = ?
+        WHERE m.is_public = 1 OR ? = 1
         ORDER BY m.created_at DESC
-    ]], {citizenid}, function(result)
+    ]], {citizenid, canViewPrivate and 1 or 0}, function(result)
         local eventName = 'style_nb:sendMagazines:' .. callbackId
         if result then
+            -- photoジョブでない場合は購入数を隠す
+            if not isPhoto then
+                for i, magazine in ipairs(result) do
+                    result[i].purchase_count = nil
+                end
+            end
             TriggerClientEvent(eventName, src, result)
         else
             TriggerClientEvent(eventName, src, {})
@@ -49,47 +84,62 @@ AddEventHandler('style_nb:getMagazineDetail', function(magazineId, callbackId)
 
     local citizenid = Player.PlayerData.citizenid
     local eventName = 'style_nb:sendMagazineDetail:' .. callbackId
+    local isPhoto = Player.PlayerData.job.name == 'photo'
+    local canViewPrivate = isPhotoJob(Player)
 
-    -- 購入確認
-    exports.oxmysql:fetch('SELECT citizenid FROM style_purchased_magazines WHERE magazine_id = ? AND citizenid = ?', {magazineId, citizenid}, function(purchaseResult)
-        local isPurchased = purchaseResult and #purchaseResult > 0
-        local isPhoto = Player.PlayerData.job.name == 'photo'
-
-        -- photoジョブまたは購入済みの場合のみ詳細を返す
-        if isPhoto or isPurchased then
-            exports.oxmysql:fetch([[
-                SELECT
-                    m.id,
-                    m.title,
-                    m.description,
-                    m.cover_image,
-                    m.price,
-                    m.created_at
-                FROM style_magazines m
-                WHERE m.id = ?
-            ]], {magazineId}, function(magResult)
-                if magResult and magResult[1] then
-                    local magazine = magResult[1]
-
-                    -- 写真リスト取得
-                    exports.oxmysql:fetch([[
-                        SELECT id, image_url, caption, page_order
-                        FROM style_magazine_photos
-                        WHERE magazine_id = ?
-                        ORDER BY page_order ASC
-                    ]], {magazineId}, function(photoResult)
-                        magazine.photos = photoResult or {}
-                        magazine.isPurchased = isPurchased
-                        magazine.isPhoto = isPhoto
-                        TriggerClientEvent(eventName, src, magazine)
-                    end)
-                else
-                    TriggerClientEvent(eventName, src, nil)
-                end
-            end)
-        else
-            TriggerClientEvent(eventName, src, {error = 'not_purchased'})
+    exports.oxmysql:fetch([[
+        SELECT
+            m.id,
+            m.title,
+            m.description,
+            m.cover_image,
+            m.price,
+            m.is_public,
+            m.purchase_password,
+            m.created_at
+        FROM style_magazines m
+        WHERE m.id = ?
+    ]], {magazineId}, function(magResult)
+        if not magResult or not magResult[1] then
+            TriggerClientEvent(eventName, src, nil)
+            return
         end
+
+        local magazine = magResult[1]
+
+        if tonumber(magazine.is_public) == 0 and not canViewPrivate then
+            TriggerClientEvent(eventName, src, {error = 'private_restricted'})
+            return
+        end
+
+        -- 購入確認
+        exports.oxmysql:fetch('SELECT citizenid FROM style_purchased_magazines WHERE magazine_id = ? AND citizenid = ?', {magazineId, citizenid}, function(purchaseResult)
+            local isPurchased = purchaseResult and #purchaseResult > 0
+
+            -- photoジョブまたは購入済みの場合のみ詳細を返す
+            if isPhoto or isPurchased then
+                -- 写真リスト取得
+                exports.oxmysql:fetch([[
+                    SELECT id, image_url, caption, page_order
+                    FROM style_magazine_photos
+                    WHERE magazine_id = ?
+                    ORDER BY page_order ASC
+                ]], {magazineId}, function(photoResult)
+                    magazine.photos = photoResult or {}
+                    magazine.isPurchased = isPurchased
+                    magazine.isPhoto = isPhoto
+                    magazine.requires_password = normalizeText(magazine.purchase_password) ~= ''
+
+                    if not isPhoto then
+                        magazine.purchase_password = nil
+                    end
+
+                    TriggerClientEvent(eventName, src, magazine)
+                end)
+            else
+                TriggerClientEvent(eventName, src, {error = 'not_purchased'})
+            end
+        end)
     end)
 end)
 
@@ -110,10 +160,16 @@ AddEventHandler('style_nb:createMagazine', function(data, callbackId)
         return
     end
 
+    local isPublic = data.isPublic == false and 0 or 1
+    local purchasePassword = normalizeText(data.purchasePassword)
+    if purchasePassword == '' then
+        purchasePassword = nil
+    end
+
     -- 雑誌作成
     exports.oxmysql:insert(
-        'INSERT INTO style_magazines (title, description, cover_image, price) VALUES (?, ?, ?, ?)',
-        {data.title, data.description or '', data.coverImage, data.price},
+        'INSERT INTO style_magazines (title, description, cover_image, price, is_public, purchase_password) VALUES (?, ?, ?, ?, ?, ?)',
+        {data.title, data.description or '', data.coverImage, data.price, isPublic, purchasePassword},
         function(magazineId)
             if magazineId then
                 -- 写真登録
@@ -156,10 +212,16 @@ AddEventHandler('style_nb:updateMagazine', function(data, callbackId)
         return
     end
 
+    local isPublic = data.isPublic == false and 0 or 1
+    local purchasePassword = normalizeText(data.purchasePassword)
+    if purchasePassword == '' then
+        purchasePassword = nil
+    end
+
     -- 雑誌情報更新
     exports.oxmysql:execute(
-        'UPDATE style_magazines SET title = ?, description = ?, cover_image = ?, price = ? WHERE id = ?',
-        {data.title, data.description or '', data.coverImage, data.price, data.id},
+        'UPDATE style_magazines SET title = ?, description = ?, cover_image = ?, price = ?, is_public = ?, purchase_password = ? WHERE id = ?',
+        {data.title, data.description or '', data.coverImage, data.price, isPublic, purchasePassword, data.id},
         function()
             -- 既存写真を削除して再登録
             exports.oxmysql:execute('DELETE FROM style_magazine_photos WHERE magazine_id = ?', {data.id}, function()
@@ -212,37 +274,65 @@ end)
 -- 雑誌購入
 -- ============================================
 RegisterNetEvent('style_nb:purchaseMagazine')
-AddEventHandler('style_nb:purchaseMagazine', function(magazineId, price, callbackId)
+AddEventHandler('style_nb:purchaseMagazine', function(magazineId, price, purchasePassword, callbackId)
     local src = source
     local Player = QBCore.Functions.GetPlayer(src)
     if not Player then return end
 
+    if callbackId == nil then
+        callbackId = purchasePassword
+        purchasePassword = nil
+    end
+
     local citizenid = Player.PlayerData.citizenid
     local eventName = 'style_nb:magazinePurchased:' .. callbackId
+    local canViewPrivate = isPhotoJob(Player)
+    local inputPassword = normalizeText(purchasePassword)
 
-    -- 既に購入済みか確認
-    exports.oxmysql:fetch('SELECT id FROM style_purchased_magazines WHERE magazine_id = ? AND citizenid = ?', {magazineId, citizenid}, function(result)
-        if result and #result > 0 then
-            TriggerClientEvent(eventName, src, {success = false, message = '既に購入しています。'})
+    exports.oxmysql:fetch('SELECT id, price, is_public, purchase_password FROM style_magazines WHERE id = ?', {magazineId}, function(magResult)
+        if not magResult or not magResult[1] then
+            TriggerClientEvent(eventName, src, {success = false, message = '記事が見つかりません。'})
             return
         end
 
-        -- 所持金確認と引き落とし
-        if Player.Functions.RemoveMoney('bank', price, 'style-nb-purchase') then
-            -- 購入記録登録
-            exports.oxmysql:insert('INSERT INTO style_purchased_magazines (magazine_id, citizenid) VALUES (?, ?)', {magazineId, citizenid}, function(id)
-                if id then
-                    -- photoアカウントに入金
-                    exports['okokBanking']:AddMoney('photo', price)
-                    print('[Style N&B] Magazine purchased:', magazineId, 'by', citizenid)
-                    TriggerClientEvent(eventName, src, {success = true})
-                else
-                    TriggerClientEvent(eventName, src, {success = false, message = '購入処理に失敗しました。'})
-                end
-            end)
-        else
-            TriggerClientEvent(eventName, src, {success = false, message = '所持金が足りません。'})
+        local magazine = magResult[1]
+        local dbPrice = tonumber(magazine.price) or 0
+        local requiredPassword = normalizeText(magazine.purchase_password)
+
+        if tonumber(magazine.is_public) == 0 and not canViewPrivate then
+            TriggerClientEvent(eventName, src, {success = false, message = 'この非公開記事は購入できません。'})
+            return
         end
+
+        if requiredPassword ~= '' and inputPassword ~= requiredPassword then
+            TriggerClientEvent(eventName, src, {success = false, message = '購入パスワードが違います。'})
+            return
+        end
+
+        -- 既に購入済みか確認
+        exports.oxmysql:fetch('SELECT id FROM style_purchased_magazines WHERE magazine_id = ? AND citizenid = ?', {magazineId, citizenid}, function(result)
+            if result and #result > 0 then
+                TriggerClientEvent(eventName, src, {success = false, message = '既に購入しています。'})
+                return
+            end
+
+            -- 所持金確認と引き落とし
+            if Player.Functions.RemoveMoney('bank', dbPrice, 'style-nb-purchase') then
+                -- 購入記録登録
+                exports.oxmysql:insert('INSERT INTO style_purchased_magazines (magazine_id, citizenid) VALUES (?, ?)', {magazineId, citizenid}, function(id)
+                    if id then
+                        -- photoアカウントに入金
+                        exports['okokBanking']:AddMoney('photo', dbPrice)
+                        print('[Style N&B] Magazine purchased:', magazineId, 'by', citizenid)
+                        TriggerClientEvent(eventName, src, {success = true})
+                    else
+                        TriggerClientEvent(eventName, src, {success = false, message = '購入処理に失敗しました。'})
+                    end
+                end)
+            else
+                TriggerClientEvent(eventName, src, {success = false, message = '所持金が足りません。'})
+            end
+        end)
     end)
 end)
 

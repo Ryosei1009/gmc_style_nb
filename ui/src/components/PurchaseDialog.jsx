@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 const PurchaseDialog = ({ magazine, onConfirm, onCancel }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [message, setMessage] = useState('');
+  const [purchasePassword, setPurchasePassword] = useState('');
 
   const handlePurchase = async () => {
     setIsProcessing(true);
@@ -12,7 +13,7 @@ const PurchaseDialog = ({ magazine, onConfirm, onCancel }) => {
       const response = await fetch('https://gmc_style_nb/purchaseMagazine', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: magazine.id, price: magazine.price })
+        body: JSON.stringify({ id: magazine.id, price: magazine.price, password: purchasePassword })
       });
       const result = await response.json();
 
@@ -55,6 +56,20 @@ const PurchaseDialog = ({ magazine, onConfirm, onCancel }) => {
           <div className="purchase-price">
             <span className="price-amount">${magazine.price}</span>
           </div>
+
+          {magazine.requires_password && (
+            <div className="form-group" style={{ marginTop: '12px' }}>
+              <label className="form-label">購入パスワード</label>
+              <input
+                type="password"
+                className="form-input"
+                value={purchasePassword}
+                onChange={(e) => setPurchasePassword(e.target.value)}
+                placeholder="パスワードを入力"
+                maxLength={100}
+              />
+            </div>
+          )}
 
           {message && (
             <div className={`dialog-message ${message.includes('失敗') || message.includes('エラー') || message.includes('足りません') ? 'error' : 'success'}`}>

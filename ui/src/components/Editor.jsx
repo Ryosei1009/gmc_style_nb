@@ -4,6 +4,8 @@ const Editor = ({ magazine, onSave, onCancel }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
+  const [isPublic, setIsPublic] = useState(true);
+  const [purchasePassword, setPurchasePassword] = useState('');
   const [coverImage, setCoverImage] = useState('');
   const [photos, setPhotos] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -16,6 +18,8 @@ const Editor = ({ magazine, onSave, onCancel }) => {
       setTitle(magazine.title || '');
       setDescription(magazine.description || '');
       setPrice(magazine.price || '');
+      setIsPublic(magazine.is_public === undefined ? true : !!Number(magazine.is_public));
+      setPurchasePassword(magazine.purchase_password || '');
       setCoverImage(magazine.cover_image || '');
       // データベースの image_url を imageUrl に変換
       const mappedPhotos = (magazine.photos || []).map(p => ({
@@ -25,6 +29,8 @@ const Editor = ({ magazine, onSave, onCancel }) => {
       setPhotos(mappedPhotos.length > 0 ? mappedPhotos : [{ imageUrl: '', caption: '' }]);
     } else {
       // 新規作成時の初期値
+      setIsPublic(true);
+      setPurchasePassword('');
       setPhotos([{ imageUrl: '', caption: '' }]);
     }
   }, [magazine]);
@@ -92,6 +98,8 @@ const Editor = ({ magazine, onSave, onCancel }) => {
       description,
       coverImage,
       price: parseInt(price) || 0,
+      isPublic,
+      purchasePassword,
       photos: validPhotos
     };
 
@@ -168,6 +176,30 @@ const Editor = ({ magazine, onSave, onCancel }) => {
               onChange={(e) => setPrice(e.target.value)}
               placeholder="0"
               min={0}
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">公開設定</label>
+            <select
+              className="form-input"
+              value={isPublic ? 'public' : 'private'}
+              onChange={(e) => setIsPublic(e.target.value === 'public')}
+            >
+              <option value="public">公開</option>
+              <option value="private">非公開（ジョブ所持者のみ表示）</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">購入パスワード（任意）</label>
+            <input
+              type="text"
+              className="form-input"
+              value={purchasePassword}
+              onChange={(e) => setPurchasePassword(e.target.value)}
+              placeholder="設定すると購入時に入力必須"
+              maxLength={100}
             />
           </div>
 

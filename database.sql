@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS `style_magazines` (
   `description` TEXT COMMENT '雑誌説明文',
   `cover_image` VARCHAR(500) NOT NULL COMMENT '表紙画像URL',
   `price` INT NOT NULL DEFAULT 0 COMMENT '販売価格',
+  `is_public` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '公開状態(1=公開,0=非公開)',
+  `purchase_password` VARCHAR(100) NULL COMMENT '購入時に必要なパスワード',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

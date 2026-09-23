@@ -44,9 +44,9 @@ function App() {
       if (devMode) {
         // デバッグ用ダミーデータ
         setMagazines([
-          { id: 1, title: "Street Snap Vol.1", description: "街角の素敵なスナップ写真集", cover_image: "https://picsum.photos/300/400?random=1", price: 500, purchased: "YC12345" },
-          { id: 2, title: "Gravition Collection", description: "グラビアフォトブック", cover_image: "https://picsum.photos/300/400?random=2", price: 1000, purchased: "" },
-          { id: 3, title: "Car Life", description: "愛車のフォトブック", cover_image: "https://picsum.photos/300/400?random=3", price: 800, purchased: "" },
+          { id: 1, title: "Street Snap Vol.1", description: "街角の素敵なスナップ写真集", cover_image: "https://picsum.photos/300/400?random=1", price: 500, purchased: "YC12345", is_public: 1, requires_password: 0 },
+          { id: 2, title: "Gravition Collection", description: "グラビアフォトブック", cover_image: "https://picsum.photos/300/400?random=2", price: 1000, purchased: "", is_public: 0, requires_password: 1 },
+          { id: 3, title: "Car Life", description: "愛車のフォトブック", cover_image: "https://picsum.photos/300/400?random=3", price: 800, purchased: "", is_public: 1, requires_password: 0 },
         ]);
       } else {
         const response = await fetch('https://gmc_style_nb/getMagazines', { method: 'POST' });
@@ -101,6 +101,8 @@ function App() {
         if (result.success && result.magazine) {
           setSelectedMagazine(result.magazine);
           setScreen('viewer');
+        } else if (result.magazine && result.magazine.error === 'private_restricted') {
+          alert('この非公開記事は閲覧できません。');
         }
       }
     } catch (error) {

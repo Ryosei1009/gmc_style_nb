@@ -91,7 +91,7 @@ RegisterNUICallback('purchaseMagazine', function(data, cb)
     local callbackId = registerTempCallback('style_nb:magazinePurchased', function(result)
         cb(result)
     end)
-    TriggerServerEvent('style_nb:purchaseMagazine', data.id, data.price, callbackId)
+    TriggerServerEvent('style_nb:purchaseMagazine', data.id, data.price, data.password, callbackId)
 end)
 
 -- プレイヤージョブ取得

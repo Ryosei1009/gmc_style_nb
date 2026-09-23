@@ -24,6 +24,12 @@ const MagazineList = ({ magazines, onMagazineClick, onEdit, isPhoto }) => {
                 {magazine.purchased && (
                   <div className="purchased-badge">読む</div>
                 )}
+                {Number(magazine.is_public) === 0 && (
+                  <div className="purchased-badge" style={{ top: '38px', backgroundColor: '#333' }}>非公開</div>
+                )}
+                {magazine.requires_password && (
+                  <div className="purchased-badge" style={{ top: '66px', backgroundColor: '#7a1f1f' }}>PW必須</div>
+                )}
               </div>
               <div className="magazine-info">
                 <h3 className="magazine-title">{magazine.title}</h3>
@@ -33,6 +39,9 @@ const MagazineList = ({ magazines, onMagazineClick, onEdit, isPhoto }) => {
                     <span className="purchased-label">購入済み</span>
                   ) : (
                     <span className="price-label">${magazine.price}</span>
+                  )}
+                  {isPhoto && magazine.purchase_count !== undefined && (
+                    <span className="purchase-count-label">購入数: {magazine.purchase_count}</span>
                   )}
                   {isPhoto && (
                     <button
